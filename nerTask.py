@@ -1,6 +1,7 @@
 import os
 import json
 from collections import OrderedDict
+from tokenizers import BertWordPieceTokenizer
 
 
 def convert_to_conll(data, filename, data_dir=".", suffix=""):
@@ -52,6 +53,45 @@ def _pass_conflict_check(anno_labels):
     return True
 
 
+def convert_to_conll_with_chinese_bert(data, filename, data_dir=".", suffix=""):
+    tokenizer = BertWordPieceTokenizer("./data/bert-chinese-vocab.txt")
+    clean_data = []
+    for item in data:
+        text = item['text']
+        labels = item['labels']
+        positions = set()
+        BIO_labels = OrderedDict()
+        for label_key in labels:
+            anno_labels = list(sorted(labels[label_key], key=lambda x: x[0]))
+            if not _pass_conflict_check(anno_labels):
+                raise Exception("标注冲突，数据为：" + json.dumps(item, ensure_ascii=False))
+            for single_label in anno_labels:
+                positions.add(single_label[0])
+                positions.add(single_label[1])
+        positions = list(sorted(positions))
+        shift_left = dict()
+        before_position = 0
+        camculate = 0
+        for position in positions:
+            tmp = text[before_position:position]
+            clean_tmp = "".join(tokenizer.normalize(tmp).split())
+            interv = len(tmp) - len(clean_tmp) + camculate
+            shift_left[position] = interv
+            before_position = position
+            camculate = interv
+        clean_example = {"labels": dict()}
+        for label_key in labels:
+            anno_labels = list(sorted(labels[label_key], key=lambda x: x[0]))
+            for single_label in anno_labels:
+                clean_example['labels'][label_key] = clean_example['labels'].get(label_key, [])
+                clean_example['labels'][label_key].append(
+                    [single_label[0] - shift_left[single_label[0]], single_label[1] - shift_left[single_label[1]],
+                     single_label[2]])
+        clean_example['text'] = "".join(tokenizer.normalize(text).split())
+        clean_data.append(clean_example)
+    convert_to_conll_with_chinese_bert(clean_data, filename, data_dir, suffix)
+
+
 if __name__ == '__main__':
     data = [
         {"text": "这是一个测试数据集合，测试的是BIO数据集转换是否正常",
@@ -59,4 +99,4 @@ if __name__ == '__main__':
         {"text": "这是一个测试数据集合，测试的是BIO数据集转换是否正常",
          "labels": {"label1": [[0, 2, 'ORG'], [11, 17, 'PER']], "label2": [[0, 2, 'Struct1'], [11, 17, 'Struct2']]}}
     ]
-    convert_to_conll(data,"conlltest")
+    convert_to_conll(data, "conlltest")
